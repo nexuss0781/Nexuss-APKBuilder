@@ -24,13 +24,14 @@ def create_file(path, content):
         f.write(content.strip())
 
 def get_inputs():
-    print(f"{ANSI_BOLD}--- MIDNIGHT OBSIDIAN APK BUILDER ---{ANSI_RESET}")
+    print(f"{ANSI_BOLD}--- MIDNIGHT OBSIDIAN APK BUILDER (FIXED) ---{ANSI_RESET}")
     app_name = input(f"{ANSI_CYAN}?> App Name:{ANSI_RESET} ").strip()
     url = input(f"{ANSI_CYAN}?> Website URL:{ANSI_RESET} ").strip()
     icon_path = input(f"{ANSI_CYAN}?> Path to Icon (png/jpg):{ANSI_RESET} ").strip()
     
-    # Sanitize app name for package id (e.g., "My App" -> "com.myapp.web")
+    # Sanitize app name
     safe_name = "".join(c for c in app_name if c.isalnum()).lower()
+    if not safe_name: safe_name = "myapp"
     package_name = f"com.{safe_name}.web"
     
     return app_name, url, icon_path, package_name
@@ -63,10 +64,19 @@ def generate_manifest(package_name, app_name):
 """
 
 def generate_gradle_build(package_name):
+    # FIXED: Added explicit buildscript block to define AGP version
     return f"""
-plugins {{
-    id 'com.android.application'
+buildscript {{
+    repositories {{
+        google()
+        mavenCentral()
+    }}
+    dependencies {{
+        classpath 'com.android.tools.build:gradle:8.1.1'
+    }}
 }}
+
+apply plugin: 'com.android.application'
 
 android {{
     namespace '{package_name}'
@@ -92,6 +102,11 @@ android {{
     }}
 }}
 
+repositories {{
+    google()
+    mavenCentral()
+}}
+
 dependencies {{
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.9.0'
@@ -100,21 +115,17 @@ dependencies {{
 """
 
 def generate_styles():
-    # THEME: Midnight Obsidian (OLED Black + Neon Cyan)
     return """
 <resources>
-    <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Colors -->
         <item name="colorPrimary">#121212</item>
         <item name="colorPrimaryVariant">#000000</item>
         <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorSecondary">#00E5FF</item> <!-- Neon Cyan -->
+        <item name="colorSecondary">#00E5FF</item>
         <item name="android:statusBarColor">#000000</item>
         <item name="android:windowBackground">#121212</item>
         <item name="android:forceDarkAllowed">true</item>
     </style>
-    
     <color name="neon_accent">#00E5FF</color>
     <color name="obsidian_bg">#121212</color>
 </resources>
@@ -142,7 +153,6 @@ def generate_layout():
             android:background="@color/obsidian_bg"
             app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
             
-        <!-- The Neon Progress Bar -->
         <ProgressBar
             android:id="@+id/progressBar"
             style="?android:attr/progressBarStyleHorizontal"
@@ -174,16 +184,10 @@ def generate_neon_progress_drawable():
     return """
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@android:id/background">
-        <shape>
-            <solid android:color="#121212"/>
-        </shape>
+        <shape><solid android:color="#121212"/></shape>
     </item>
     <item android:id="@android:id/progress">
-        <clip>
-            <shape>
-                <solid android:color="#00E5FF"/> <!-- Neon Cyan -->
-            </shape>
-        </clip>
+        <clip><shape><solid android:color="#00E5FF"/></shape></clip>
     </item>
 </layer-list>
 """
@@ -192,18 +196,9 @@ def generate_menu():
     return """
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
       xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item
-        android:id="@+id/action_share"
-        android:title="Share"
-        app:showAsAction="never" />
-    <item
-        android:id="@+id/action_clear"
-        android:title="Clear Cache"
-        app:showAsAction="never" />
-    <item
-        android:id="@+id/action_home"
-        android:title="Back to Home"
-        app:showAsAction="never" />
+    <item android:id="@+id/action_share" android:title="Share" app:showAsAction="never" />
+    <item android:id="@+id/action_clear" android:title="Clear Cache" app:showAsAction="never" />
+    <item android:id="@+id/action_home" android:title="Back to Home" app:showAsAction="never" />
 </menu>
 """
 
@@ -259,7 +254,6 @@ public class MainActivity extends AppCompatActivity {{
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
-        // FORCE DARK MODE ENGINE
         settings.setForceDark(WebSettings.FORCE_DARK_ON);
 
         webView.setWebViewClient(new WebViewClient() {{
@@ -268,16 +262,14 @@ public class MainActivity extends AppCompatActivity {{
                 progressBar.setVisibility(View.VISIBLE);
                 progressBar.setProgress(0);
             }}
-
             @Override
             public void onPageFinished(WebView view, String url) {{
                 progressBar.setVisibility(View.GONE);
                 swipeRefresh.setRefreshing(false);
             }}
-            
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {{
-                return false; // Keep navigation inside the app
+                return false;
             }}
         }});
 
@@ -290,11 +282,9 @@ public class MainActivity extends AppCompatActivity {{
     }}
 
     private void setupSwipeRefresh() {{
-        swipeRefresh.setColorSchemeColors(0xFF00E5FF); // Neon Cyan Spinner
-        swipeRefresh.setProgressBackgroundColorSchemeColor(0xFF121212); // Dark Background
-        
+        swipeRefresh.setColorSchemeColors(0xFF00E5FF);
+        swipeRefresh.setProgressBackgroundColorSchemeColor(0xFF121212);
         swipeRefresh.setOnRefreshListener(() -> {{
-            // HAPTIC FEEDBACK
             swipeRefresh.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             webView.reload();
         }});
@@ -340,8 +330,6 @@ public class MainActivity extends AppCompatActivity {{
 def process_icons(source_path, res_dir):
     try:
         img = Image.open(source_path).convert("RGBA")
-        
-        # Standard Android Icon Sizes
         sizes = {
             "mipmap-mdpi": (48, 48),
             "mipmap-hdpi": (72, 72),
@@ -349,24 +337,19 @@ def process_icons(source_path, res_dir):
             "mipmap-xxhdpi": (144, 144),
             "mipmap-xxxhdpi": (192, 192)
         }
-        
         for folder, size in sizes.items():
             path = os.path.join(res_dir, folder)
             os.makedirs(path, exist_ok=True)
             resized_img = img.resize(size, Image.Resampling.LANCZOS)
             resized_img.save(os.path.join(path, "ic_launcher.png"))
-            
         print_status("App Icons generated successfully.")
     except Exception as e:
         print(f"Error processing icon: {e}")
         sys.exit(1)
 
-# --- MAIN EXECUTION ---
-
 def main():
     app_name, url, icon_path, package_name = get_inputs()
     
-    # 1. Setup Directories
     if os.path.exists(BUILD_DIR):
         shutil.rmtree(BUILD_DIR)
     
@@ -378,8 +361,12 @@ def main():
     print_status("Generating Project Skeleton...")
     
     # 2. Inject Code
+    # Note: We now use a simpler settings.gradle
     create_file(os.path.join(BUILD_DIR, "settings.gradle"), f"rootProject.name = '{app_name}'\ninclude ':app'")
     create_file(os.path.join(BUILD_DIR, "local.properties"), f"sdk.dir={SDK_DIR}")
+    # Added gradle.properties to prevent memory issues on Render
+    create_file(os.path.join(BUILD_DIR, "gradle.properties"), "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8")
+    
     create_file(os.path.join(app_dir, "build.gradle"), generate_gradle_build(package_name))
     create_file(os.path.join(main_dir, "AndroidManifest.xml"), generate_manifest(package_name, app_name))
     create_file(os.path.join(java_dir, "MainActivity.java"), generate_java(package_name, url))
@@ -388,27 +375,23 @@ def main():
     create_file(os.path.join(res_dir, "drawable", "neon_progress.xml"), generate_neon_progress_drawable())
     create_file(os.path.join(res_dir, "menu", "main_menu.xml"), generate_menu())
     
-    # 3. Process Icons
     print_status("Processing Graphics...")
     process_icons(icon_path, res_dir)
     
-    # 4. Compile
     print_status("Compiling APK (This may take a minute)...")
     try:
-        # Using system 'gradle' as per Docker environment
-        cmd = ["gradle", "assembleDebug"]
+        # We explicitly call gradle with stacktrace if it fails
+        cmd = ["gradle", "assembleDebug", "--no-daemon"]
         subprocess.run(cmd, cwd=BUILD_DIR, check=True)
     except Exception as e:
-        print(f"Build failed. Ensure Gradle is installed and in PATH.\nError: {e}")
+        print(f"Build failed. Please check the logs above.\nError: {e}")
         return
 
-    # 5. Extract Output
     output_apk = os.path.join(BUILD_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
     final_name = f"{app_name.replace(' ', '_')}.apk"
     
     if os.path.exists(output_apk):
         shutil.move(output_apk, final_name)
-        # Cleanup
         shutil.rmtree(BUILD_DIR)
         print_success(f"Build Complete! APK saved as: {final_name}")
     else:
