@@ -9,7 +9,6 @@ from PIL import Image
 # --- CONFIGURATION ---
 BUILD_DIR = os.path.abspath("temp_build")
 SDK_DIR = "/opt/android-sdk"
-# We use Gradle 8.2.1 which is stable and works with Java 17
 GRADLE_VERSION = "8.2.1" 
 GRADLE_URL = f"https://services.gradle.org/distributions/gradle-{GRADLE_VERSION}-bin.zip"
 GRADLE_LOCAL_DIR = os.path.abspath(f"gradle-{GRADLE_VERSION}")
@@ -27,31 +26,20 @@ def success(msg): print(f"{C_GREEN}[SUCCESS]{C_RESET} {C_BOLD}{msg}{C_RESET}")
 def error(msg): print(f"{C_RED}[ERROR]{C_RESET} {msg}")
 
 def ensure_gradle():
-    """Ensures a compatible Gradle version is present."""
     if os.path.exists(GRADLE_EXE):
         return GRADLE_EXE
-    
-    log(f"System Gradle is incompatible. Downloading Gradle {GRADLE_VERSION} (Portable)...")
+    log(f"Downloading Gradle {GRADLE_VERSION}...")
     zip_path = "gradle_dist.zip"
-    
     try:
-        # Download
         urllib.request.urlretrieve(GRADLE_URL, zip_path)
-        log("Extracting Gradle...")
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(".")
-        
-        # Cleanup Zip
         os.remove(zip_path)
-        
-        # Make executable
         st = os.stat(GRADLE_EXE)
         os.chmod(GRADLE_EXE, st.st_mode | 0o111)
-        
-        success("Gradle portable installed.")
         return GRADLE_EXE
     except Exception as e:
-        error(f"Failed to setup Gradle: {e}")
+        error(f"Gradle setup failed: {e}")
         sys.exit(1)
 
 def create_file(path, content):
@@ -60,69 +48,53 @@ def create_file(path, content):
         f.write(content.strip())
 
 def get_inputs():
-    print(f"{C_BOLD}--- MIDNIGHT OBSIDIAN BUILDER (FINAL) ---{C_RESET}")
+    print(f"{C_BOLD}--- MIDNIGHT OBSIDIAN BUILDER (LEGACY MODE) ---{C_RESET}")
     app_name = input(f"{C_CYAN}?> App Name:{C_RESET} ").strip()
     url = input(f"{C_CYAN}?> Website URL:{C_RESET} ").strip()
     icon_path = input(f"{C_CYAN}?> Path to Icon (png/jpg):{C_RESET} ").strip()
     
-    safe_name = "".join(c for c in app_name if c.isalnum()).lower()
-    if not safe_name: safe_name = "myapp"
+    safe_name = "".join(c for c in app_name if c.isalnum()).lower() or "myapp"
     package_name = f"com.{safe_name}.web"
-    
     return app_name, url, icon_path, package_name
 
 # --- TEMPLATES ---
 
 def generate_settings(app_name):
-    # FIXED: Added pluginManagement to tell Gradle where to find the Android Plugin
+    # Simple settings file. No complex pluginManagement here.
     return f"""
-pluginManagement {{
-    repositories {{
-        google()
-        mavenCentral()
-        gradlePluginPortal()
-    }}
-}}
-dependencyResolutionManagement {{
-    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
-    repositories {{
-        google()
-        mavenCentral()
-    }}
-}}
 rootProject.name = '{app_name}'
 include ':app'
 """
 
-def generate_manifest(package_name, app_name):
-    return f"""
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="{package_name}">
-    <uses-permission android:name="android.permission.INTERNET" />
-    <application
-        android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="{app_name}"
-        android:roundIcon="@mipmap/ic_launcher"
-        android:supportsRtl="true"
-        android:theme="@style/AppTheme">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
+def generate_root_build():
+    # THE FIX: We explicitly define the buildscript classpath here.
+    # This forces Gradle to look in google() before doing anything else.
+    return """
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.0'
+    }
+}
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
 """
 
-def generate_gradle_build(package_name):
+def generate_app_build(package_name):
+    # Note: We apply the plugin by ID, but the VERSION is already handled in root.
     return f"""
 plugins {{
-    id 'com.android.application' version '8.1.0'
+    id 'com.android.application'
 }}
 
 android {{
@@ -156,86 +128,34 @@ dependencies {{
 }}
 """
 
-def generate_styles():
-    return """
-<resources>
-    <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">#121212</item>
-        <item name="colorPrimaryVariant">#000000</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorSecondary">#00E5FF</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:windowBackground">#121212</item>
-        <item name="android:forceDarkAllowed">true</item>
-    </style>
-</resources>
-"""
-
-def generate_layout():
-    return """
-<?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout 
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#121212">
-
-    <com.google.android.material.appbar.AppBarLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
-
-        <androidx.appcompat.widget.Toolbar
-            android:id="@+id/toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="#121212"
-            app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
-            
-        <ProgressBar
-            android:id="@+id/progressBar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:indeterminate="false"
-            android:progressDrawable="@drawable/neon_progress"
-            android:visibility="gone" />
-
-    </com.google.android.material.appbar.AppBarLayout>
-
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-        android:id="@+id/swipeRefresh"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior">
-
-        <WebView
-            android:id="@+id/webView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
-
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
-"""
-
-def generate_neon_progress():
-    return """
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@android:id/background">
-        <shape><solid android:color="#121212"/></shape>
-    </item>
-    <item android:id="@android:id/progress">
-        <clip><shape><solid android:color="#00E5FF"/></shape></clip>
-    </item>
-</layer-list>
+def generate_manifest(package_name, app_name):
+    return f"""
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="{package_name}">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="{app_name}"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
 """
 
 def generate_java(package_name, target_url):
     return f"""
 package {package_name};
-
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Bundle;
@@ -254,7 +174,6 @@ import androidx.appcompat.widget.Toolbar;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 public class MainActivity extends AppCompatActivity {{
-
     private WebView webView;
     private SwipeRefreshLayout swipeRefresh;
     private ProgressBar progressBar;
@@ -264,20 +183,14 @@ public class MainActivity extends AppCompatActivity {{
     protected void onCreate(Bundle savedInstanceState) {{
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
-
         progressBar = findViewById(R.id.progressBar);
         swipeRefresh = findViewById(R.id.swipeRefresh);
         webView = findViewById(R.id.webView);
-
         setupWebView();
         setupSwipeRefresh();
-        
-        if (savedInstanceState == null) {{
-            webView.loadUrl(TARGET_URL);
-        }}
+        if (savedInstanceState == null) {{ webView.loadUrl(TARGET_URL); }}
     }}
 
     private void setupWebView() {{
@@ -285,7 +198,6 @@ public class MainActivity extends AppCompatActivity {{
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setForceDark(WebSettings.FORCE_DARK_ON);
-
         webView.setWebViewClient(new WebViewClient() {{
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {{
@@ -298,16 +210,11 @@ public class MainActivity extends AppCompatActivity {{
                 swipeRefresh.setRefreshing(false);
             }}
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {{
-                return false;
-            }}
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {{ return false; }}
         }});
-
         webView.setWebChromeClient(new WebChromeClient() {{
             @Override
-            public void onProgressChanged(WebView view, int newProgress) {{
-                progressBar.setProgress(newProgress);
-            }}
+            public void onProgressChanged(WebView view, int newProgress) {{ progressBar.setProgress(newProgress); }}
         }});
     }}
 
@@ -337,101 +244,139 @@ public class MainActivity extends AppCompatActivity {{
                 shareIntent.putExtra(Intent.EXTRA_TEXT, webView.getUrl());
                 startActivity(Intent.createChooser(shareIntent, "Share via"));
                 return true;
-            case 2:
-                webView.clearCache(true);
-                webView.reload();
-                return true;
-            case 3:
-                webView.loadUrl(TARGET_URL);
-                return true;
+            case 2: webView.clearCache(true); webView.reload(); return true;
+            case 3: webView.loadUrl(TARGET_URL); return true;
         }}
         return super.onOptionsItemSelected(item);
     }}
 
     @Override
     public void onBackPressed() {{
-        if (webView.canGoBack()) {{
-            webView.goBack();
-        }} else {{
-            super.onBackPressed();
-        }}
+        if (webView.canGoBack()) {{ webView.goBack(); }} else {{ super.onBackPressed(); }}
     }}
 }}
+"""
+
+def generate_styles():
+    return """
+<resources>
+    <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#121212</item>
+        <item name="colorPrimaryVariant">#000000</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#00E5FF</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:windowBackground">#121212</item>
+        <item name="android:forceDarkAllowed">true</item>
+    </style>
+</resources>
+"""
+
+def generate_layout():
+    return """
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout 
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212">
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="#121212"
+            app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:indeterminate="false"
+            android:progressDrawable="@drawable/neon_progress"
+            android:visibility="gone" />
+    </com.google.android.material.appbar.AppBarLayout>
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefresh"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+        <WebView
+            android:id="@+id/webView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
+"""
+
+def generate_neon_progress():
+    return """
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape><solid android:color="#121212"/></shape>
+    </item>
+    <item android:id="@android:id/progress">
+        <clip><shape><solid android:color="#00E5FF"/></shape></clip>
+    </item>
+</layer-list>
 """
 
 def process_icons(source_path, res_dir):
     try:
         img = Image.open(source_path).convert("RGBA")
-        sizes = {
-            "mipmap-mdpi": (48, 48),
-            "mipmap-hdpi": (72, 72),
-            "mipmap-xhdpi": (96, 96),
-            "mipmap-xxhdpi": (144, 144),
-            "mipmap-xxxhdpi": (192, 192)
-        }
+        sizes = {"mipmap-mdpi": (48, 48), "mipmap-hdpi": (72, 72), "mipmap-xhdpi": (96, 96), "mipmap-xxhdpi": (144, 144), "mipmap-xxxhdpi": (192, 192)}
         for folder, size in sizes.items():
             path = os.path.join(res_dir, folder)
             os.makedirs(path, exist_ok=True)
-            resized_img = img.resize(size, Image.Resampling.LANCZOS)
-            resized_img.save(os.path.join(path, "ic_launcher.png"))
+            img.resize(size, Image.Resampling.LANCZOS).save(os.path.join(path, "ic_launcher.png"))
         log("Icons generated.")
     except Exception as e:
-        error(f"Icon processing failed: {e}")
+        error(f"Icon error: {e}")
         sys.exit(1)
 
 def main():
-    # 1. BOOTSTRAP: Get working Gradle
     gradle_bin = ensure_gradle()
-    
-    # 2. INPUTS
     app_name, url, icon_path, package_name = get_inputs()
     
-    # 3. SCAFFOLDING
-    if os.path.exists(BUILD_DIR):
-        shutil.rmtree(BUILD_DIR)
-    
+    if os.path.exists(BUILD_DIR): shutil.rmtree(BUILD_DIR)
     app_dir = os.path.join(BUILD_DIR, "app")
     main_dir = os.path.join(app_dir, "src", "main")
     java_dir = os.path.join(main_dir, "java", *package_name.split("."))
     res_dir = os.path.join(main_dir, "res")
     
-    log("Writing source code...")
-    
-    # FIXED: Calling the new settings generator
+    log("Scaffolding Project...")
     create_file(os.path.join(BUILD_DIR, "settings.gradle"), generate_settings(app_name))
-    
+    create_file(os.path.join(BUILD_DIR, "build.gradle"), generate_root_build()) # ROOT BUILD FILE
     create_file(os.path.join(BUILD_DIR, "local.properties"), f"sdk.dir={SDK_DIR}")
     create_file(os.path.join(BUILD_DIR, "gradle.properties"), "org.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8")
     
-    create_file(os.path.join(app_dir, "build.gradle"), generate_gradle_build(package_name))
+    create_file(os.path.join(app_dir, "build.gradle"), generate_app_build(package_name))
     create_file(os.path.join(main_dir, "AndroidManifest.xml"), generate_manifest(package_name, app_name))
     create_file(os.path.join(java_dir, "MainActivity.java"), generate_java(package_name, url))
     create_file(os.path.join(res_dir, "values", "styles.xml"), generate_styles())
     create_file(os.path.join(res_dir, "layout", "activity_main.xml"), generate_layout())
     create_file(os.path.join(res_dir, "drawable", "neon_progress.xml"), generate_neon_progress())
     
-    # 4. IMAGES
     process_icons(icon_path, res_dir)
     
-    # 5. BUILD
-    log("Starting build with Portable Gradle...")
+    log("Building APK...")
     try:
-        cmd = [gradle_bin, "assembleDebug", "--no-daemon", "--stacktrace"]
-        subprocess.run(cmd, cwd=BUILD_DIR, check=True)
+        subprocess.run([gradle_bin, "assembleDebug", "--no-daemon", "--stacktrace"], cwd=BUILD_DIR, check=True)
+        
+        output_apk = os.path.join(BUILD_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+        if os.path.exists(output_apk):
+            final_name = f"{app_name.replace(' ', '_')}.apk"
+            shutil.move(output_apk, final_name)
+            shutil.rmtree(BUILD_DIR)
+            success(f"Build Success! File: {final_name}")
+        else:
+            error("APK not found.")
     except subprocess.CalledProcessError:
-        error("Build Failed. See logs above.")
-        return
-
-    # 6. EXPORT
-    output_apk = os.path.join(BUILD_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
-    final_name = f"{app_name.replace(' ', '_')}.apk"
-    
-    if os.path.exists(output_apk):
-        shutil.move(output_apk, final_name)
-        shutil.rmtree(BUILD_DIR)
-        success(f"Build Complete! Download {final_name} now.")
-    else:
-        error("APK not found after build.")
+        error("Build Failed. Check logs.")
 
 if __name__ == "__main__":
     main()
