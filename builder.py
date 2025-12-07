@@ -9,7 +9,8 @@ from PIL import Image
 # --- CONFIGURATION ---
 BUILD_DIR = os.path.abspath("temp_build")
 SDK_DIR = "/opt/android-sdk"
-GRADLE_VERSION = "8.2.1" # Compatible with Java 17 & SDK 33
+# We use Gradle 8.2.1 which is stable and works with Java 17
+GRADLE_VERSION = "8.2.1" 
 GRADLE_URL = f"https://services.gradle.org/distributions/gradle-{GRADLE_VERSION}-bin.zip"
 GRADLE_LOCAL_DIR = os.path.abspath(f"gradle-{GRADLE_VERSION}")
 GRADLE_EXE = os.path.join(GRADLE_LOCAL_DIR, "bin", "gradle")
@@ -30,7 +31,7 @@ def ensure_gradle():
     if os.path.exists(GRADLE_EXE):
         return GRADLE_EXE
     
-    log(f"System Gradle is too old. Downloading Gradle {GRADLE_VERSION} (Portable)...")
+    log(f"System Gradle is incompatible. Downloading Gradle {GRADLE_VERSION} (Portable)...")
     zip_path = "gradle_dist.zip"
     
     try:
@@ -59,7 +60,7 @@ def create_file(path, content):
         f.write(content.strip())
 
 def get_inputs():
-    print(f"{C_BOLD}--- MIDNIGHT OBSIDIAN BUILDER (PORTABLE ENGINE) ---{C_RESET}")
+    print(f"{C_BOLD}--- MIDNIGHT OBSIDIAN BUILDER (FINAL) ---{C_RESET}")
     app_name = input(f"{C_CYAN}?> App Name:{C_RESET} ").strip()
     url = input(f"{C_CYAN}?> Website URL:{C_RESET} ").strip()
     icon_path = input(f"{C_CYAN}?> Path to Icon (png/jpg):{C_RESET} ").strip()
@@ -71,6 +72,27 @@ def get_inputs():
     return app_name, url, icon_path, package_name
 
 # --- TEMPLATES ---
+
+def generate_settings(app_name):
+    # FIXED: Added pluginManagement to tell Gradle where to find the Android Plugin
+    return f"""
+pluginManagement {{
+    repositories {{
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }}
+}}
+dependencyResolutionManagement {{
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+    repositories {{
+        google()
+        mavenCentral()
+    }}
+}}
+rootProject.name = '{app_name}'
+include ':app'
+"""
 
 def generate_manifest(package_name, app_name):
     return f"""
@@ -98,7 +120,6 @@ def generate_manifest(package_name, app_name):
 """
 
 def generate_gradle_build(package_name):
-    # Modern Gradle 8.x + AGP 8.1.0 (Compatible with Java 17)
     return f"""
 plugins {{
     id 'com.android.application' version '8.1.0'
@@ -126,11 +147,6 @@ android {{
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }}
-}}
-
-repositories {{
-    google()
-    mavenCentral()
 }}
 
 dependencies {{
@@ -224,6 +240,8 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.view.HapticFeedbackConstants;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -234,8 +252,6 @@ import android.widget.ProgressBar;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
-import android.view.Menu;
-import android.view.MenuItem;
 
 public class MainActivity extends AppCompatActivity {{
 
@@ -381,9 +397,10 @@ def main():
     
     log("Writing source code...")
     
-    create_file(os.path.join(BUILD_DIR, "settings.gradle"), f"rootProject.name = '{app_name}'\ninclude ':app'")
+    # FIXED: Calling the new settings generator
+    create_file(os.path.join(BUILD_DIR, "settings.gradle"), generate_settings(app_name))
+    
     create_file(os.path.join(BUILD_DIR, "local.properties"), f"sdk.dir={SDK_DIR}")
-    # Fix for memory constraint
     create_file(os.path.join(BUILD_DIR, "gradle.properties"), "org.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8")
     
     create_file(os.path.join(app_dir, "build.gradle"), generate_gradle_build(package_name))
@@ -397,7 +414,7 @@ def main():
     process_icons(icon_path, res_dir)
     
     # 5. BUILD
-    log("Starting build with Portable Gradle... (First run downloads dependencies)")
+    log("Starting build with Portable Gradle...")
     try:
         cmd = [gradle_bin, "assembleDebug", "--no-daemon", "--stacktrace"]
         subprocess.run(cmd, cwd=BUILD_DIR, check=True)
