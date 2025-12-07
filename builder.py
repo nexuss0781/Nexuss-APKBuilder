@@ -6,7 +6,7 @@ from PIL import Image
 
 # --- CONFIGURATION ---
 BUILD_DIR = "temp_build"
-SDK_DIR = "/opt/android-sdk"  # Based on your Docker image path
+SDK_DIR = "/opt/android-sdk"
 ANSI_CYAN = "\033[96m"
 ANSI_GREEN = "\033[92m"
 ANSI_RESET = "\033[0m"
@@ -24,12 +24,11 @@ def create_file(path, content):
         f.write(content.strip())
 
 def get_inputs():
-    print(f"{ANSI_BOLD}--- MIDNIGHT OBSIDIAN APK BUILDER (FIXED) ---{ANSI_RESET}")
+    print(f"{ANSI_BOLD}--- MIDNIGHT OBSIDIAN BUILDER (COMPATIBILITY MODE) ---{ANSI_RESET}")
     app_name = input(f"{ANSI_CYAN}?> App Name:{ANSI_RESET} ").strip()
     url = input(f"{ANSI_CYAN}?> Website URL:{ANSI_RESET} ").strip()
     icon_path = input(f"{ANSI_CYAN}?> Path to Icon (png/jpg):{ANSI_RESET} ").strip()
     
-    # Sanitize app name
     safe_name = "".join(c for c in app_name if c.isalnum()).lower()
     if not safe_name: safe_name = "myapp"
     package_name = f"com.{safe_name}.web"
@@ -64,7 +63,8 @@ def generate_manifest(package_name, app_name):
 """
 
 def generate_gradle_build(package_name):
-    # FIXED: Added explicit buildscript block to define AGP version
+    # CHANGED: Downgraded to 7.3.1 for maximum compatibility
+    # CHANGED: Using strict legacy 'buildscript' block structure
     return f"""
 buildscript {{
     repositories {{
@@ -72,7 +72,7 @@ buildscript {{
         mavenCentral()
     }}
     dependencies {{
-        classpath 'com.android.tools.build:gradle:8.1.1'
+        classpath 'com.android.tools.build:gradle:7.3.1'
     }}
 }}
 
@@ -360,12 +360,11 @@ def main():
     
     print_status("Generating Project Skeleton...")
     
-    # 2. Inject Code
-    # Note: We now use a simpler settings.gradle
+    # Files
     create_file(os.path.join(BUILD_DIR, "settings.gradle"), f"rootProject.name = '{app_name}'\ninclude ':app'")
     create_file(os.path.join(BUILD_DIR, "local.properties"), f"sdk.dir={SDK_DIR}")
-    # Added gradle.properties to prevent memory issues on Render
-    create_file(os.path.join(BUILD_DIR, "gradle.properties"), "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8")
+    # CHANGED: Lowered memory to 1536m to prevent OOM kills on Render
+    create_file(os.path.join(BUILD_DIR, "gradle.properties"), "org.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8")
     
     create_file(os.path.join(app_dir, "build.gradle"), generate_gradle_build(package_name))
     create_file(os.path.join(main_dir, "AndroidManifest.xml"), generate_manifest(package_name, app_name))
@@ -380,11 +379,11 @@ def main():
     
     print_status("Compiling APK (This may take a minute)...")
     try:
-        # We explicitly call gradle with stacktrace if it fails
-        cmd = ["gradle", "assembleDebug", "--no-daemon"]
+        # Added --stacktrace so if it fails, we see exactly why
+        cmd = ["gradle", "assembleDebug", "--no-daemon", "--stacktrace"]
         subprocess.run(cmd, cwd=BUILD_DIR, check=True)
     except Exception as e:
-        print(f"Build failed. Please check the logs above.\nError: {e}")
+        print(f"Build failed.\nError: {e}")
         return
 
     output_apk = os.path.join(BUILD_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
